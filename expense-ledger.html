@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger — Expense Journal</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --paper:#eae6d6;
+  --paper-row:#e2ded0;
+  --rule:#b9b39a;
+  --rule-soft:#cfc9b2;
+  --ink:#262b45;
+  --ink-soft:#63678a;
+  --ink-faint:#8b8f9e;
+  --red:#92393a;
+  --green:#3e6b52;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0;
+  background:#d7d3c5;
+  color:var(--ink);
+  font-family:'Spectral',serif;
+}
+button,input,select,textarea { font:inherit; color:inherit; }
+button { cursor:pointer; }
+#ledger-root {
+  background:var(--paper);
+  max-width:720px;
+  min-height:100vh;
+  margin:auto;
+  padding:2.5rem 2rem 3rem;
+  border-left:1px solid var(--rule);
+  border-right:1px solid var(--rule);
+}
+.mono { font-family:'IBM Plex Mono',monospace; }
+.lg-loading {
+  text-align:center;
+  padding:3rem 0;
+  color:var(--ink-soft);
+  font-style:italic;
+}
+.lg-error { color:var(--red); font-size:.85rem; margin:12px 0; }
+.auth-box { max-width:400px; margin:70px auto; text-align:center; }
+.auth-box h1 { font-size:2rem; margin-bottom:0; }
+.auth-box p { color:var(--ink-soft); }
+.auth-box input {
+  width:100%; padding:12px; margin:8px 0;
+  background:var(--paper-row); border:1px solid var(--rule);
+}
+.auth-box button {
+  padding:12px; border:1px solid var(--ink);
+  background:var(--ink); color:var(--paper);
+  width:100%; margin-top:8px;
+}
+.auth-box .auth-toggle {
+  background:none; color:var(--ink);
+  border:none; text-decoration:underline;
+}
+.lg-header {
+  display:flex; justify-content:space-between;
+  align-items:baseline; border-bottom:2px solid var(--ink);
+  padding-bottom:.9rem; margin-bottom:1.6rem;
+  flex-wrap:wrap; gap:.6rem;
+}
+.lg-title { font-size:1.9rem; font-weight:600; }
+.lg-sub {
+  font-size:.85rem; font-style:italic;
+  color:var(--ink-soft); margin-top:.15rem;
+}
+.lg-month-nav {
+  display:flex; align-items:center; gap:.6rem;
+  font-family:'IBM Plex Mono',monospace; font-size:.85rem;
+}
+.lg-month-nav button {
+  background:none; border:1px solid var(--rule);
+  width:1.6rem; height:1.6rem;
+}
+.lg-month-nav button:disabled { opacity:.35; cursor:default; }
+.lg-month-label { min-width:8.5rem; text-align:center; }
+.lg-summary {
+  display:flex; border:1px solid var(--rule);
+  margin-bottom:1.8rem;
+}
+.lg-stat {
+  flex:1; padding:.7rem 1rem;
+  border-right:1px solid var(--rule); min-width:0;
+}
+.lg-stat:last-child { border-right:none; }
+.lg-stat-label {
+  font-size:.72rem; color:var(--ink-soft);
+  font-style:italic; margin-bottom:.25rem;
+}
+.lg-stat-value {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:1.05rem; font-weight:500;
+  overflow-wrap:anywhere;
+}
+.lg-add-label {
+  font-size:.85rem; font-style:italic;
+  color:var(--ink-soft); margin-bottom:.5rem;
+}
+.lg-add-form {
+  display:grid;
+  grid-template-columns:8rem 8rem 1fr 7rem auto;
+  gap:.5rem; padding-bottom:1.4rem;
+  margin-bottom:1.4rem; border-bottom:2px solid var(--ink);
+}
+.lg-add-form input,.lg-add-form select {
+  background:var(--paper-row); border:1px solid var(--rule);
+  padding:.45rem .5rem; font-size:.85rem; min-width:0;
+}
+.lg-add-btn {
+  background:var(--ink); color:var(--paper);
+  border:1px solid var(--ink); padding:.5rem 1rem;
+  font-size:.82rem; font-weight:600;
+}
+.lg-add-btn:disabled { opacity:.5; cursor:wait; }
+.lg-day-block { margin-bottom:.2rem; }
+.lg-day-heading {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.78rem; color:var(--ink-soft);
+  padding:.6rem 0 .3rem;
+  border-bottom:1px solid var(--rule-soft);
+}
+.lg-row {
+  display:grid;
+  grid-template-columns:6.5rem 1fr 6.5rem 1.4rem;
+  gap:.5rem; align-items:baseline;
+  padding:.45rem 0;
+  border-bottom:1px solid var(--rule-soft);
+  font-size:.9rem;
+}
+.lg-row .note {
+  color:var(--ink-soft); font-style:italic;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.lg-row .amt {
+  font-family:'IBM Plex Mono',monospace; text-align:right;
+}
+.void-btn {
+  background:none; border:none; color:var(--ink-faint);
+  text-align:right; padding:0;
+}
+.lg-confirm-inline { display:flex; gap:.35rem; justify-content:flex-end; }
+.lg-confirm-yes,.lg-confirm-no {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.72rem; border:1px solid var(--rule);
+  background:var(--paper-row); padding:.1rem .35rem;
+}
+.lg-confirm-yes { color:var(--red); border-color:var(--red); }
+.lg-confirm-no { color:var(--ink-soft); }
+.lg-subtotal {
+  display:grid;
+  grid-template-columns:6.5rem 1fr 6.5rem 1.4rem;
+  gap:.5rem; padding:.35rem 0 .8rem;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:.82rem; color:var(--ink-soft);
+}
+.lg-subtotal .lbl { grid-column:2; text-align:right; font-style:italic; }
+.lg-subtotal .val {
+  text-align:right; border-top:1px solid var(--rule);
+  padding-top:.2rem;
+}
+.lg-empty {
+  padding:2rem 0; text-align:center;
+  color:var(--ink-soft); font-style:italic; font-size:.9rem;
+}
+.lg-breakdown {
+  margin-top:2.2rem; padding-top:1rem;
+  border-top:2px solid var(--ink);
+}
+.lg-breakdown-title { font-size:1.05rem; font-weight:600; margin-bottom:1rem; }
+.lg-pie-wrap { display:flex; align-items:center; gap:1.8rem; flex-wrap:wrap; }
+.lg-pie {
+  width:9.5rem; height:9.5rem; border-radius:50%;
+  border:1px solid var(--rule); flex-shrink:0;
+}
+.lg-legend { flex:1; min-width:12rem; }
+.lg-cat-row {
+  display:grid; grid-template-columns:.7rem 6rem 1fr 3rem;
+  align-items:center; gap:.55rem; padding:.3rem 0;
+  border-bottom:1px solid var(--rule-soft); font-size:.85rem;
+}
+.lg-cat-swatch { width:.7rem; height:.7rem; border-radius:50%; }
+.lg-cat-amt,.lg-cat-pct {
+  font-family:'IBM Plex Mono',monospace; text-align:right;
+}
+.lg-cat-pct { color:var(--ink-soft); }
+.lg-backup {
+  margin-top:1.6rem; padding-top:1rem;
+  border-top:1px dashed var(--rule);
+}
+.lg-backup-btn {
+  background:none; border:1px solid var(--rule);
+  color:var(--ink-soft); font-size:.78rem; padding:.35rem .7rem;
+}
+.lg-backup-hint {
+  font-size:.78rem; font-style:italic;
+  color:var(--ink-soft); margin:.6rem 0 .5rem;
+}
+.lg-backup-text {
+  width:100%; min-height:8rem;
+  font-family:'IBM Plex Mono',monospace; font-size:.78rem;
+  background:var(--paper-row); border:1px solid var(--rule);
+  padding:.6rem; resize:vertical;
+}
+.lg-footer { margin-top:2rem; text-align:right; }
+.lg-clear-btn {
+  background:none; border:none; color:var(--ink-faint);
+  font-size:.75rem; font-style:italic; text-decoration:underline;
+}
+.lg-clear-confirm {
+  font-size:.78rem; font-style:italic; color:var(--red);
+  display:inline-flex; align-items:center; gap:.5rem;
+  flex-wrap:wrap; justify-content:flex-end;
+}
+@media(max-width:620px) {
+  #ledger-root { padding:1.5rem 1rem; }
+  .lg-add-form { grid-template-columns:1fr 1fr; }
+  .lg-add-form .lg-note { grid-column:1/-1; }
+  .lg-add-form .lg-amount { grid-column:1; }
+  .lg-add-form .lg-add-btn { grid-column:2; }
+}
+@media(max-width:420px) {
+  .lg-row,.lg-subtotal {
+    grid-template-columns:5rem 1fr 5.5rem 1.2rem;
+    gap:.3rem; font-size:.8rem;
+  }
+  .lg-stat { padding:.6rem .45rem; }
+  .lg-stat-value { font-size:.85rem; }
+}
+</style>
+</head>
+
+<body>
+<div id="ledger-root">
+  <div class="lg-loading">Opening the ledger…</div>
+</div>
+
+<script>
+/* SUPABASE CONFIGURATION */
+const SUPABASE_URL = "https://kkgtenvspvebujwldzbf.supabase.co";
+const SUPABASE_KEY = "sb_publishable_SvreSXK4HzuIs1jPVK7B1Q_62e13vr8";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+(function () {
+  const root = document.getElementById('ledger-root');
+
+  const CATEGORIES = [
+    'Food','Transport','Groceries','Bills',
+    'Entertainment','Health','Other'
+  ];
+
+  const CATEGORY_COLORS = {
+    Food:'#92393a',
+    Transport:'#3d6b6b',
+    Groceries:'#3e6b52',
+    Bills:'#a67c3d',
+    Entertainment:'#6b4c6b',
+    Health:'#4a5a8a',
+    Other:'#63678a'
+  };
+
+  let currentUser = null;
+  let authMode = 'login';
+  let entries = [];
+  let viewYear;
+  let viewMonth;
+  let loaded = false;
+  let loadError = '';
+  let formError = '';
+  let busy = false;
+  let pendingDeleteId = null;
+  let pendingClearAll = false;
+  let showBackup = false;
+
+  function today() { return new Date(); }
+
+  function pad(n) { return String(n).padStart(2,'0'); }
+
+  function isoDate(d) {
+    return d.getFullYear() + '-' +
+      pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  }
+
+  function rp(n) {
+    const hasCents = Math.round(n*100)%100 !== 0;
+    return '¥' + Number(n).toLocaleString('zh-CN',{
+      minimumFractionDigits:hasCents?2:0,
+      maximumFractionDigits:2
+    });
+  }
+
+  function monthLabel(y,m) {
+    return new Date(y,m,1).toLocaleDateString(
+      'en-US',{month:'long',year:'numeric'}
+    );
+  }
+
+  function dayHeading(dateStr) {
+    return new Date(dateStr+'T00:00:00').toLocaleDateString(
+      'en-US',{weekday:'short',day:'numeric',month:'short'}
+    );
+  }
+
+  function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;',
+      '"':'&quot;',"'":'&#39;'
+    })[c]);
+  }
+
+  function backupText(list) {
+    const sorted = [...list].sort((a,b)=>a.date.localeCompare(b.date));
+    return 'date, category, amount, note\n' +
+      sorted.map(e =>
+        `${e.date}, ${e.category}, ${e.amount}, ${e.note || ''}`
+      ).join('\n');
+  }
+
+  /* AUTHENTICATION */
+
+  async function initializeAuth() {
+    root.innerHTML = '<div class="lg-loading">Checking your account…</div>';
+
+    const {data,error} = await supabaseClient.auth.getSession();
+
+    if (error) {
+      showAuthScreen(error.message);
+      return;
+    }
+
+    if (data.session) {
+      currentUser = data.session.user;
+      await load();
+    } else {
+      showAuthScreen();
+    }
+  }
+
+  function showAuthScreen(message='') {
+    root.innerHTML = `
+      <div class="auth-box">
+        <h1>Ledger</h1>
+        <p>Your personal expense journal</p>
+        <form id="auth-form">
+          <input id="auth-email" type="email"
+            placeholder="Email address" required autocomplete="email">
+          <input id="auth-password" type="password"
+            placeholder="Password (at least 6 characters)"
+            minlength="6" required
+            autocomplete="${authMode==='login'?'current-password':'new-password'}">
+          <button id="auth-submit" type="submit">
+            ${authMode==='login'?'Sign in':'Create account'}
+          </button>
+        </form>
+        <p id="auth-message" class="lg-error">${escapeHTML(message)}</p>
+        <button id="auth-toggle" class="auth-toggle" type="button">
+          ${authMode==='login'
+            ?'Create a new account'
+            :'Already have an account? Sign in'}
+        </button>
+      </div>`;
+
+    document.getElementById('auth-toggle').onclick = () => {
+      authMode = authMode==='login'?'signup':'login';
+      showAuthScreen();
+    };
+
+    document.getElementById('auth-form').onsubmit = async event => {
+      event.preventDefault();
+
+      const email = document.getElementById('auth-email').value.trim();
+      const password = document.getElementById('auth-password').value;
+      const message = document.getElementById('auth-message');
+      const submit = document.getElementById('auth-submit');
+
+      submit.disabled = true;
+      message.textContent = 'Please wait…';
+
+      try {
+        if (authMode==='signup') {
+          const {data,error} = await supabaseClient.auth.signUp({
+            email,password
+          });
+          if (error) throw error;
+
+          if (data.session) {
+            currentUser = data.user;
+            await load();
+          } else {
+            message.textContent =
+              'Account created! Check your email to verify your account.';
+            submit.disabled = false;
+          }
+        } else {
+          const {data,error} = await supabaseClient.auth.signInWithPassword({
+            email,password
+          });
+          if (error) throw error;
+          currentUser = data.user;
+          await load();
+        }
+      } catch (error) {
+        message.textContent = error.message;
+        submit.disabled = false;
+      }
+    };
+  }
+
+  async function signOut() {
+    const {error} = await supabaseClient.auth.signOut();
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    currentUser = null;
+    entries = [];
+    loaded = false;
+    showAuthScreen();
+  }
+
+  /* DATABASE
+     IMPORTANT: The database date column is expense_date.
+  */
+
+  async function load() {
+    if (!currentUser) {
+      showAuthScreen();
+      return;
+    }
+
+    loaded = false;
+    loadError = '';
+    root.innerHTML = '<div class="lg-loading">Loading your expenses…</div>';
+
+    try {
+      const {data,error} = await supabaseClient
+        .from('expenses')
+        .select('id,user_id,expense_date,category,note,amount')
+        .eq('user_id',currentUser.id)
+        .order('expense_date',{ascending:false});
+
+      if (error) throw error;
+
+      entries = data.map(e => ({
+        id:e.id,
+        date:e.expense_date,
+        category:e.category,
+        note:e.note || '',
+        amount:Number(e.amount)
+      }));
+
+    } catch (error) {
+      console.error('Loading expenses failed:',error);
+      entries = [];
+      loadError = error.message || 'Could not load expenses.';
+    }
+
+    loaded = true;
+    const now = today();
+    viewYear = now.getFullYear();
+    viewMonth = now.getMonth();
+    render();
+  }
+
+  async function addEntry(data) {
+    if (busy) return;
+    busy = true;
+    formError = '';
+    render();
+
+    try {
+      const {data:newEntry,error} = await supabaseClient
+        .from('expenses')
+        .insert({
+          user_id:currentUser.id,
+          expense_date:data.date,
+          category:data.category,
+          note:data.note || '',
+          amount:data.amount
+        })
+        .select('id,user_id,expense_date,category,note,amount')
+        .single();
+
+      if (error) throw error;
+
+      entries.push({
+        id:newEntry.id,
+        date:newEntry.expense_date,
+        category:newEntry.category,
+        note:newEntry.note || '',
+        amount:Number(newEntry.amount)
+      });
+
+      const d = new Date(data.date+'T00:00:00');
+      viewYear = d.getFullYear();
+      viewMonth = d.getMonth();
+
+    } catch (error) {
+      console.error('Adding expense failed:',error);
+      formError = error.message || 'Could not save the expense.';
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function removeEntry(id) {
+    if (busy) return;
+    busy = true;
+
+    try {
+      const {error} = await supabaseClient
+        .from('expenses')
+        .delete()
+        .eq('id',id)
+        .eq('user_id',currentUser.id);
+
+      if (error) throw error;
+
+      entries = entries.filter(e=>String(e.id)!==String(id));
+      pendingDeleteId = null;
+
+    } catch (error) {
+      console.error('Deleting expense failed:',error);
+      alert(error.message || 'Could not delete this expense.');
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function clearAll() {
+    if (busy) return;
+    busy = true;
+
+    try {
+      const {error} = await supabaseClient
+        .from('expenses')
+        .delete()
+        .eq('user_id',currentUser.id);
+
+      if (error) throw error;
+
+      entries = [];
+      pendingClearAll = false;
+
+    } catch (error) {
+      console.error('Clearing expenses failed:',error);
+      alert(error.message || 'Could not clear your expenses.');
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  /* CALCULATIONS */
+
+  function entriesForMonth(y,m) {
+    return entries.filter(e => {
+      const d = new Date(e.date+'T00:00:00');
+      return d.getFullYear()===y && d.getMonth()===m;
+    });
+  }
+
+  function computeSummary() {
+    const todayIso = isoDate(today());
+    const todayTotal = entries
+      .filter(e=>e.date===todayIso)
+      .reduce((s,e)=>s+e.amount,0);
+
+    const monthEntries = entriesForMonth(viewYear,viewMonth);
+    const monthTotal = monthEntries.reduce((s,e)=>s+e.amount,0);
+    const daysLogged = new Set(monthEntries.map(e=>e.date)).size;
+
+    return {todayTotal,monthTotal,daysLogged};
+  }
+
+  function groupByDay(list) {
+    const map = {};
+    list.forEach(e => {
+      if (!map[e.date]) map[e.date] = [];
+      map[e.date].push(e);
+    });
+    return Object.keys(map).sort((a,b)=>b.localeCompare(a))
+      .map(date=>({date,items:map[date]}));
+  }
+
+  function categoryBreakdown(list) {
+    const map = {};
+    list.forEach(e => {
+      map[e.category] = (map[e.category] || 0) + e.amount;
+    });
+    return Object.keys(map)
+      .map(cat=>({cat,amount:map[cat]}))
+      .sort((a,b)=>b.amount-a.amount);
+  }
+
+  function shiftMonth(delta) {
+    viewMonth += delta;
+    if (viewMonth<0) { viewMonth=11; viewYear--; }
+    if (viewMonth>11) { viewMonth=0; viewYear++; }
+    render();
+  }
+
+  function isCurrentMonth() {
+    const now = today();
+    return viewYear===now.getFullYear() &&
+      viewMonth===now.getMonth();
+  }
+
+  /* MAIN INTERFACE */
+
+  function render() {
+    if (!loaded) {
+      root.innerHTML = '<div class="lg-loading">Opening the ledger…</div>';
+      return;
+    }
+
+    if (!currentUser) {
+      showAuthScreen();
+      return;
+    }
+
+    const {todayTotal,monthTotal,daysLogged} = computeSummary();
+    const monthEntries = entriesForMonth(viewYear,viewMonth);
+    const dayGroups = groupByDay(monthEntries);
+    const breakdown = categoryBreakdown(monthEntries);
+    const breakdownTotal = breakdown.reduce((s,b)=>s+b.amount,0);
+
+    let pieGradient = '';
+    if (breakdownTotal>0) {
+      let cursor = 0;
+      const segments = breakdown.map(b => {
+        const start = cursor;
+        cursor += (b.amount/breakdownTotal)*100;
+        return `${CATEGORY_COLORS[b.cat] || '#63678a'} ${start}% ${cursor}%`;
+      });
+      pieGradient = `conic-gradient(${segments.join(', ')})`;
+    }
+
+    const catOptions = CATEGORIES.map(c =>
+      `<option value="${c}">${c}</option>`
+    ).join('');
+
+    root.innerHTML = `
+      ${loadError ? `
+        <div class="lg-error">
+          Could not load your expenses: ${escapeHTML(loadError)}
+          <button id="lg-retry" type="button">Retry</button>
+        </div>` : ''}
+
+      <div class="lg-header">
+        <div>
+          <div class="lg-title">Ledger</div>
+          <div class="lg-sub">daily expense record</div>
+          <div class="lg-sub">${escapeHTML(currentUser.email)}</div>
+          <button class="lg-backup-btn" id="lg-signout">Sign out</button>
+        </div>
+        <div class="lg-month-nav">
+          <button id="lg-prev" aria-label="Previous month">‹</button>
+          <span class="lg-month-label">${monthLabel(viewYear,viewMonth)}</span>
+          <button id="lg-next" aria-label="Next month"
+            ${isCurrentMonth()?'disabled':''}>›</button>
+        </div>
+      </div>
+
+      <div class="lg-summary">
+        <div class="lg-stat">
+          <div class="lg-stat-label">today</div>
+          <div class="lg-stat-value">${rp(todayTotal)}</div>
+        </div>
+        <div class="lg-stat">
+          <div class="lg-stat-label">this month</div>
+          <div class="lg-stat-value">${rp(monthTotal)}</div>
+        </div>
+        <div class="lg-stat">
+          <div class="lg-stat-label">days logged</div>
+          <div class="lg-stat-value">${daysLogged}</div>
+        </div>
+      </div>
+
+      <div class="lg-add-label">Record an expense</div>
+      <form class="lg-add-form" id="lg-form">
+        <input type="date" id="lg-date" value="${isoDate(today())}" required>
+        <select id="lg-category">${catOptions}</select>
+        <input class="lg-note" type="text" id="lg-note"
+          placeholder="note (optional)" maxlength="60">
+        <input class="lg-amount" type="number" id="lg-amount"
+          placeholder="amount" min="0.01" step="0.01" required>
+        <button class="lg-add-btn" id="lg-record-btn"
+          type="submit" ${busy?'disabled':''}>
+          ${busy?'Saving…':'Record'}
+        </button>
+        ${formError ? `<div class="lg-error">${escapeHTML(formError)}</div>` : ''}
+      </form>
+
+      <div id="lg-entries">
+        ${dayGroups.length===0
+          ? '<div class="lg-empty">No entries recorded for this month yet.</div>'
+          : dayGroups.map(group => {
+              const subtotal = group.items.reduce((s,e)=>s+e.amount,0);
+              const rows = group.items
+                .sort((a,b)=>String(b.id).localeCompare(String(a.id)))
+                .map(e=>`
+                  <div class="lg-row">
+                    <div class="cat mono">${escapeHTML(e.category)}</div>
+                    <div class="note">${escapeHTML(e.note)}</div>
+                    <div class="amt">${rp(e.amount)}</div>
+                    ${String(pendingDeleteId)===String(e.id)
+                      ? `<span class="lg-confirm-inline">
+                          <button class="lg-confirm-yes"
+                            type="button" data-confirm-del="${escapeHTML(e.id)}">✓</button>
+                          <button class="lg-confirm-no"
+                            type="button" data-cancel-del>✕</button>
+                        </span>`
+                      : `<button class="void-btn" type="button"
+                          data-void="${escapeHTML(e.id)}">×</button>`
+                    }
+                  </div>`).join('');
+
+              return `
+                <div class="lg-day-block">
+                  <div class="lg-day-heading">${dayHeading(group.date)}</div>
+                  ${rows}
+                  <div class="lg-subtotal">
+                    <div class="lbl">subtotal</div>
+                    <div class="val">${rp(subtotal)}</div>
+                    <div></div>
+                  </div>
+                </div>`;
+            }).join('')
+        }
+      </div>
+
+      <div class="lg-breakdown">
+        <div class="lg-breakdown-title">By category</div>
+        ${breakdown.length===0
+          ? '<div class="lg-empty" style="padding:.5rem 0;">Nothing to break down yet.</div>'
+          : `<div class="lg-pie-wrap">
+              <div class="lg-pie" style="background:${pieGradient};"></div>
+              <div class="lg-legend">
+                ${breakdown.map(b=>`
+                  <div class="lg-cat-row">
+                    <div class="lg-cat-swatch"
+                      style="background:${CATEGORY_COLORS[b.cat] || '#63678a'};"></div>
+                    <div class="mono">${escapeHTML(b.cat)}</div>
+                    <div class="lg-cat-amt">${rp(b.amount)}</div>
+                    <div class="lg-cat-pct">${Math.round(b.amount/breakdownTotal*100)}%</div>
+                  </div>`).join('')}
+              </div>
+            </div>`
+        }
+      </div>
+
+      <div class="lg-backup">
+        <button class="lg-backup-btn" id="lg-backup-toggle">
+          ${showBackup?'Hide backup text':'Back up my data'}
+        </button>
+        ${showBackup ? `
+          <div class="lg-backup-hint">
+            Copy this text and save it somewhere safe.
+          </div>
+          <textarea class="lg-backup-text" id="lg-backup-text" readonly>${escapeHTML(backupText(entries))}</textarea>
+        ` : ''}
+      </div>
+
+      <div class="lg-footer">
+        ${pendingClearAll
+          ? `<span class="lg-clear-confirm">
+              Delete all ${entries.length} records? This cannot be undone.
+              <button class="lg-confirm-yes" id="lg-clear-confirm-yes"
+                type="button">Yes, clear all</button>
+              <button class="lg-confirm-no" id="lg-clear-confirm-no"
+                type="button">Cancel</button>
+            </span>`
+          : `<button class="lg-clear-btn" id="lg-clear" type="button">
+              clear all records
+            </button>`
+        }
+      </div>
+    `;
+
+    const retry = document.getElementById('lg-retry');
+    if (retry) retry.onclick = load;
+
+    document.getElementById('lg-signout').onclick = signOut;
+    document.getElementById('lg-prev').onclick = ()=>shiftMonth(-1);
+    document.getElementById('lg-next').onclick = ()=>shiftMonth(1);
+
+    document.getElementById('lg-form').onsubmit = event => {
+      event.preventDefault();
+      if (busy) return;
+
+      const date = document.getElementById('lg-date').value;
+      const category = document.getElementById('lg-category').value;
+      const note = document.getElementById('lg-note').value.trim();
+      const amount = Number(document.getElementById('lg-amount').value);
+
+      if (!date) {
+        formError = 'Pick a date.';
+        render();
+        return;
+      }
+      if (!Number.isFinite(amount) || amount<=0) {
+        formError = 'Enter an amount greater than 0.';
+        render();
+        return;
+      }
+
+      addEntry({date,category,note,amount});
+    };
+
+    root.querySelectorAll('[data-void]').forEach(btn=>{
+  btn.onclick = ()=>{
+    console.log("DELETE BUTTON CLICKED:", btn.dataset.void);
+    pendingDeleteId = btn.dataset.void;
+    render();
+  };
+});
+
+console.log(
+  "DELETE BUTTONS FOUND:",
+  root.querySelectorAll('[data-void]').length
+);
+
+    root.querySelectorAll('[data-confirm-del]').forEach(btn=>{
+      btn.onclick = ()=>removeEntry(btn.dataset.confirmDel);
+    });
+
+    root.querySelectorAll('[data-cancel-del]').forEach(btn=>{
+      btn.onclick = ()=>{
+        pendingDeleteId = null;
+        render();
+      };
+    });
+
+    const clearBtn = document.getElementById('lg-clear');
+    if (clearBtn) {
+      clearBtn.onclick = ()=>{
+        pendingClearAll = true;
+        render();
+      };
+    }
+
+    const clearYes = document.getElementById('lg-clear-confirm-yes');
+    if (clearYes) clearYes.onclick = clearAll;
+
+    const clearNo = document.getElementById('lg-clear-confirm-no');
+    if (clearNo) {
+      clearNo.onclick = ()=>{
+        pendingClearAll = false;
+        render();
+      };
+    }
+
+    document.getElementById('lg-backup-toggle').onclick = ()=>{
+      showBackup = !showBackup;
+      render();
+    };
+  }
+
+  /* Start app */
+  initializeAuth();
+
+})();
+</script>
+</body>
+</html>
